@@ -4,7 +4,6 @@ import 'dart:io';
 import 'package:mentorados_svg_creator/template_model.dart';
 
 import 'package:mentorados_svg_creator/user_model.dart';
-import 'package:path/path.dart' as p;
 import 'package:args/args.dart';
 
 void main(List<String> arguments) async {
@@ -49,12 +48,8 @@ void main(List<String> arguments) async {
   await out.create();
 
   final resultFiles = await userStream
-      .mapI(
-        (user, i) =>
-            (ResultingSvg.from(template)..fillWith(icons, user)).writeTo(
-          File(p.join(out.path, '$i.svg')),
-        ),
-      )
+      .map((user) => UserSvgBuilder.from(template, icons).build(user))
+      .mapI((svg, i) => svg.writeTo(out, i))
       .toList()
       .then((files) => Future.wait(files));
   print('Success! The following files have been created.');

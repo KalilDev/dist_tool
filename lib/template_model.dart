@@ -7,11 +7,12 @@ import 'package:path/path.dart' as p;
 
 class Icon {
   final XmlDocument document;
+  final File file;
 
-  Icon._(this.document);
+  Icon._(this.document, this.file);
   static Future<Icon> read(File f) async {
     final contents = await f.readAsString();
-    return Icon._(XmlDocument.parse(contents));
+    return Icon._(XmlDocument.parse(contents), f);
   }
 
   XmlElement get svg => document.rootElement;
@@ -24,11 +25,11 @@ class Icon {
   XmlElement _icon;
   XmlElement get icon => (_icon ??= svg.getElement('g')).copy();
 
-  void writeToDoc(XmlDocument doc, String locationId) {
-    doc.rootElement.getElement('defs').children.insertAll(0, iconDefs);
-    final location = _findOnSvg(doc, locationId);
+  XmlElement write(XmlElement location) {
     location.children.retainWhere((node) => false);
-    location.children.insert(0, icon);
+    final el = icon;
+    location.children.insert(0, el);
+    return el;
   }
 }
 
@@ -44,6 +45,21 @@ class Icons {
     this.eventos,
     this.mentorias,
   );
+
+  Icon iconFor(Object e) {
+    if (e is Engajamento) {
+      return engajamentos[e];
+    }
+    if (e is Evolucao) {
+      return evolucoes[e];
+    }
+    if (e is Evento) {
+      return eventos[e];
+    }
+    if (e is Mentoria) {
+      return mentorias[e];
+    }
+  }
 
   static Future<Map<T, Icon>> _loadIcons<T>(
     List<String> filenames,
@@ -120,7 +136,31 @@ class Icons {
     '4politica.svg',
     '5redacao.svg',
     '6softSkills.svg',
+    '7nenhuma.svg',
   ];
+}
+
+class Slots {
+  final Set<String> slots;
+  final String transform;
+  final void Function(XmlElement) onCreate;
+
+  Slots(this.slots, {this.transform, this.onCreate});
+
+  void fillWith(
+    Iterable<Icon> icons,
+    XmlElement Function(Icon, String) write,
+  ) {
+    iterBoth(slots, icons).forEach((kv) {
+      final ie = write(kv.item2, kv.item1);
+      if (transform != null && transform.isNotEmpty) {
+        ie.setAttribute('transform', transform);
+      }
+      if (onCreate != null) {
+        onCreate(ie);
+      }
+    });
+  }
 }
 
 class Template {
@@ -129,78 +169,113 @@ class Template {
   Template._(this.document);
 
   final String slotNome = 'tspan3463';
-  final Set<String> slotMentorias = {
+  final mentorias = Slots({
     'g2293',
     'g2311',
     'g2329',
     'g2347',
-    'g2597',
-    'g2775',
-  };
-  final Set<String> slotEngajamento = {
+    'g2579',
+    'g2383',
+  }, transform: 'scale(1.3238414)');
+  final engajamento = Slots({
     'g3113',
     'g3131',
     'g3149',
     'g3167',
     'g3185',
     'g3203',
-  };
-  final Set<String> slotEvolucao = {
+  }, transform: 'scale(1.3721091)');
+  final evolucao = Slots({
     'g3005',
     'g3023',
     'g3041',
     'g3059',
     'g3077',
     'g3095',
-  };
-  final Set<String> slotEventos = {
-    'g3221',
-    'g3239',
-    'g3257',
-    'g3275',
-    'g3293',
-    'g3311',
-  };
+  }, transform: 'matrix(1.3719816,0,0,1.3719816,-9.6687341,-9.5208581)');
+  final eventos = Slots(
+    {
+      'g3221',
+      'g3239',
+      'g3257',
+      'g3275',
+      'g3293',
+      'g3311',
+    },
+    transform: 'matrix(1.3796216,0,0,1.3796216,2.2051241,-1.9617009e-6)',
+    onCreate: (e) {
+      final offender = e.parentElement.parentElement;
+      offender.removeAttribute('clip-path');
+    },
+  );
   static Future<Template> load(File f) => f
       .readAsString() //
       .then((s) => Template._(XmlDocument.parse(s)));
 }
 
-class ResultingSvg {
+class UserSvgBuilder {
   final Template _template;
   final XmlDocument _document;
-  ResultingSvg._(this._template, this._document);
-  bool populated = false;
+  final Icons _icons;
+  UserSvgBuilder._(this._template, this._document, this._icons);
 
-  factory ResultingSvg.from(Template t) {
+  factory UserSvgBuilder.from(Template t, Icons i) {
     final doc = t.document.copy();
-    return ResultingSvg._(t, doc);
+    return UserSvgBuilder._(t, doc, i);
   }
 
-  void _write(Tuple2<String, Icon> kv) =>
-      kv.item2.writeToDoc(_document, kv.item1);
+  final _writtenIconDefs = <Icon>{};
 
-  void fillWith(Icons icons, DemostudoUser user) {
-    final engIcns = user.engajamentos.map((e) => icons.engajamentos[e]);
-    final eveIcns = user.eventos.map((e) => icons.eventos[e]);
-    final menIcns = user.mentorias.map((e) => icons.mentorias[e]);
-    final evoIcns = user.evolucao.map((e) => icons.evolucoes[e]);
+  XmlElement _writeIcon(
+    Icon icon,
+    String id,
+  ) {
+    if (!_writtenIconDefs.contains(icon)) {
+      _document.rootElement
+          .getElement('defs')
+          .children
+          .insertAll(0, icon.iconDefs);
+      _writtenIconDefs.add(icon);
+    }
+    final element = _findOnSvg(_document, id);
+    return icon.write(element);
+  }
 
-    iterBoth(_template.slotEngajamento, engIcns).forEach(_write);
-    iterBoth(_template.slotEventos, eveIcns).forEach(_write);
-    iterBoth(_template.slotMentorias, menIcns).forEach(_write);
-    iterBoth(_template.slotEvolucao, evoIcns).forEach(_write);
+  void _build(DemostudoUser user) {
+    final engIcns = user.engajamentos.map(_icons.iconFor);
+    final eveIcns = user.eventos.map(_icons.iconFor);
+    final menIcns = user.mentorias.map(_icons.iconFor).followedBy(
+          Iterable.generate(6, (_) => _icons.mentorias[Mentoria.nenhuma]),
+        );
+    final evoIcns = user.evolucao.map(_icons.iconFor);
+
+    _template
+      ..engajamento.fillWith(engIcns, _writeIcon)
+      ..eventos.fillWith(eveIcns, _writeIcon)
+      ..mentorias.fillWith(menIcns, _writeIcon)
+      ..evolucao.fillWith(evoIcns, _writeIcon);
+
     final name = _findOnSvg(_document, _template.slotNome);
     name.innerText = user.name;
-    populated = true;
   }
 
-  Future<File> writeTo(File file) async {
-    if (!populated) {
-      throw StateError('not populated');
-    }
-    return file.writeAsString(_document.toXmlString());
+  UserSvg build(DemostudoUser user) {
+    _build(user);
+    return UserSvg._(_document, user);
   }
+}
+
+class UserSvg {
+  final XmlDocument _document;
+  final DemostudoUser user;
+
+  UserSvg._(this._document, this.user);
+  Future<File> writeTo(Directory dir, int i) async {
+    final f = File(p.join(dir.path, '$i-${user.name}.svg'));
+    return f.writeAsString(_document.toXmlString());
+  }
+
+  String toXmlString() => _document.toXmlString();
 }
 
 Iterable<Tuple2<A, B>> iterBoth<A, B>(Iterable<A> a, Iterable<B> b) sync* {

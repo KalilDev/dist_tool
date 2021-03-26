@@ -8,6 +8,7 @@ enum Mentoria {
   politicaECidadania,
   redacao,
   softSkills,
+  nenhuma,
 }
 
 enum Evolucao {
